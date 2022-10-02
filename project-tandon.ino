@@ -1,6 +1,5 @@
 #include <DS3231.h>
 #include <DHT.h>
-#include <ESP8266WiFi.h>
 #include <Firebase_ESP_Client.h>
 #include "addons/TokenHelper.h"
 #include "addons/RTDBHelper.h"
@@ -8,10 +7,10 @@
 #define RELAY 1
 #define pinDHT 2
 #define pinPH 3
-#define WIFI_SSID "REPLACE_WITH_YOUR_SSID"
-#define WIFI_PASSWORD "REPLACE_WITH_YOUR_PASSWORD"
-#define API_KEY "REPLACE_WITH_YOUR_FIREBASE_PROJECT_API_KEY"
-#define DATABASE_URL "REPLACE_WITH_YOUR_FIREBASE_DATABASE_URL" 
+#define WIFI_SSID ""
+#define WIFI_PASSWORD ""
+#define API_KEY ""
+#define DATABASE_URL "" 
  
 DS3231 rtc(SDA, SCL); 
 DHT dht(pinDHT, DHT11); //Pin, Jenis DHT
