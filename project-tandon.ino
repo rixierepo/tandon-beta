@@ -1,147 +1,146 @@
-#include <RTClib.h>
+#include <DS3231.h>
+#include <DHT.h>
+#include <ESP8266WiFi.h>
+#include <Firebase_ESP_Client.h>
+#include "addons/TokenHelper.h"
+#include "addons/RTDBHelper.h"
 
-#define triggerRelay 1
-#define dataSuhu 2
-#define dataKelembaban 5
-#define dataPH 3
+#define RELAY 1
+#define pinDHT 2
+#define pinPH 3
+#define WIFI_SSID "REPLACE_WITH_YOUR_SSID"
+#define WIFI_PASSWORD "REPLACE_WITH_YOUR_PASSWORD"
+#define API_KEY "REPLACE_WITH_YOUR_FIREBASE_PROJECT_API_KEY"
+#define DATABASE_URL "REPLACE_WITH_YOUR_FIREBASE_DATABASE_URL" 
+ 
+DS3231 rtc(SDA, SCL); 
+DHT dht(pinDHT, DHT11); //Pin, Jenis DHT
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
 
-uint8_t jam0 = 0;
-uint8_t jam3 = 3;
-uint8_t jam6 = 6;
-uint8_t jam9 = 9;
-uint8_t jam12 = 12;
-uint8_t jam15 = 15;
-uint8_t jam18 = 18;
-uint8_t jam21 = 21;
-uint8_t menit = 0;
+unsigned long startingTime;
+String tanggal;
+String waktu;
+float kelembaban;
+float suhu;
+int statusPengisian;
+float volt;
+float pHLevel;
+int adcPH;
+unsigned long sendDataPrevMillis = 0;
+bool signupOK = false;
 
-//uint8_t jamPertama = 00;
-//uint8_t menitPertama = 00;
-//uint8_t jamKedua = 03;
-//uint8_t menitKedua = 00;
-//uint8_t jamKetiga = 06;
-//uint8_t menitKetiga = 00;
-//uint8_t jamKeempat = 09;
-//uint8_t menitKeempat = 00;
-//uint8_t jamKelima = 12;
-//uint8_t menitKelima = 00;
-//uint8_t jamKeenam = 15;
-//uint8_t menitKeenam = 00;
-//uint8_t jamKetujuh = 18;
-//uint8_t menitKetujuh = 00;
-//uint8_t jamKedelapan = 21;
-//uint8_t menitKedelapan = 00;
+void setup()
+{
+  pinMode(RELAY, OUTPUT);
+  pinMode(pinDHT, INPUT);
+  pinMode(pinPH, INPUT);
+  
+  Serial.begin(9600); 
+  rtc.begin(); 
+  dht.begin();
 
-RTC_DS3231 rtc;
+  millisTime = millis();
+  Serial.println("System Started at > " + startingTime);
 
-char dayOfTheWeek[7][12] = {
-  "MINGGU",
-  "SENIN",
-  "SELASA",
-  "RABU",
-  "KAMIS",
-  "JUMAT",
-  "SABTU"
-};
+  // rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); // set waktu otomatiss
+  
+  rtc.setDate(1, 10, 2022);   // set tanggal
+  rtc.setTime(23, 59, 59);     // set waktu
 
-void setup () {
-  Serial.begin(9600);
-
-  pinMode(triggerRelay, OUTPUT);
-  pinMode(dataKelembaban, INPUT);
-  pinMode(dataPH, INPUT);
-  pinMode(dataSuhu, INPUT);
-
-  // SETUP RTC MODULE
-  if (! rtc.begin()) {
-    Serial.println("RTC is Unavailable");
-    while (1);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to Network");
+  while (WiFi.status() != WL_CONNECTED){
+    Serial.print(".");
+    delay(300);
   }
 
-  // set waktu otomatis
-  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  Serial.println();
+  Serial.print("IP Address : ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
 
-  // set waktu manual
-  // format (tahun, bulan, hari, jam, 0, 0)
-  // rtc.adjust(DateTime(2021, 1, 21, 3, 0, 0));
+  config.api_key = API_KEY;
+  config.database_url = DATABASE_URL;
 
-}
+  if (Firebase.signUp(&config, &auth, "", "")){
+    Serial.println("OK");
+    signupOK = true;
+  }
+  else{
+    Serial.printf("%s\n", config.signer.signupError.message.c_str());
+  }
 
-void loop () {
-  DateTime now = rtc.now();
-
-  if (now.hour() == jam0 && now.minute() == menit){
-    digitalWrite(triggerRelay, HIGH);
-    Serial.println("relay on");
-    delay(15000);
-    digitalWrite(triggerRelay, LOW);
-    Serial.println("relay off");
-    
-  }else if(now.hour() == jam3 && now.minute() == menit){
-    digitalWrite(triggerRelay, HIGH);
-    Serial.println("relay on");
-    delay(15000);
-    digitalWrite(triggerRelay, LOW);
-    Serial.println("relay off");
-    
-  }else if(now.hour() == jam6 && now.minute() == menit){
-    digitalWrite(triggerRelay, HIGH);
-    Serial.println("relay on");
-    delay(15000);
-    digitalWrite(triggerRelay, LOW);
-    Serial.println("relay off");
+  config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
   
-  }else if(now.hour() == jam9 && now.minute() == menit){
-    digitalWrite(triggerRelay, HIGH);
-    Serial.println("relay on");
-    delay(15000);
-    digitalWrite(triggerRelay, LOW);
-    Serial.println("relay off");
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+}
+ 
+void loop(){ 
+  
+  // SENSOR PH
+  adcPH = analogRead(pinPH);
+  volt = adcPH * 5.0 / 1023;
+  pHLevel = (6.4 * volt) - 5.7;
 
-  }else if(now.hour() == jam12 && now.minute() == menit){
-    digitalWrite(triggerRelay, HIGH);
-    Serial.println("relay on");
-    delay(15000);
-    digitalWrite(triggerRelay, LOW);
-    Serial.println("relay off");
-    
-  }else if(now.hour() == jam15 && now.minute() == menit){
-    digitalWrite(triggerRelay, HIGH);
-    Serial.println("relay on");
-    delay(15000);
-    digitalWrite(triggerRelay, LOW);
-    Serial.println("relay off");
+  // RTC
+  tanggal = rtc.getDateStr(); // dd:mm:yy
+  waktu = rtc.getTimeStr(); // hh:mm:ss
 
-  }else if(now.hour() == jam18 && now.minute() == menit){
-    digitalWrite(triggerRelay, HIGH);
-    Serial.println("relay on");
-    delay(15000);
-    digitalWrite(triggerRelay, LOW);
-    Serial.println("relay off");
-    
-  }else if(now.hour() == jam21 && now.minute() == menit){
-    digitalWrite(triggerRelay, HIGH);
-    Serial.println("relay on");
-    delay(15000);
-    digitalWrite(triggerRelay, LOW);
-    Serial.println("relay off");
+  // DHT11
+  kelembaban = dht.readHumidity();
+  suhu = dht.readTemperature();
+
+  // RELAY
+  statusPengisian = digitalRead(RELAY);
+
+  if(statusPengisian != 1){
+    Serial.println("Status Pengisian : OFF");
+  }else{
+    Serial.println("Status Pengisian : ON");
   }
   
-  printTime(now);
-}
+  Serial.print(bulan + " | ");
+  Serial.print(hari + " | "); 
+  Serial.print(tanggal + " | ");
+  Serial.println(waktu); 
+  Serial.print("Suhu : " + suhu + " oC");
+  Serial.println(" | Kelembaban : " + kelembaban + " %");
+  
+  if(waktu == "23:59:59"){
+    digitalWrite(RELAY, HIGH);
+  }
+  if(waktu == "02:59:59"){
+    digitalWrite(RELAY, LOW);
+  }
+  if(waktu == "05:59:59"){
+    digitalWrite(RELAY, HIGH);
+  }
+  if(waktu == "08:59:59"){
+    digitalWrite(RELAY, LOW);
+  }
+  if(waktu == "11:59:59"){
+    digitalWrite(RELAY, HIGH);
+  }
+  if(waktu == "14:59:59"){
+    digitalWrite(RELAY, LOW);
+  }
+  if(waktu == "17:59:59"){
+    digitalWrite(RELAY, HIGH);
+  }
+  if(waktu == "20:59:59"){
+    digitalWrite(RELAY, LOW);
+  }
 
-void printTime(DateTime time) {
-  Serial.print(time.year(), DEC);
-  Serial.print('/');
-  Serial.print(time.month(), DEC);
-  Serial.print('/');
-  Serial.print(time.day(), DEC);
-  Serial.print(" (");
-  Serial.print(dayOfTheWeek[time.dayOfTheWeek()]);
-  Serial.print(") ");
-  Serial.print(time.hour(), DEC);
-  Serial.print(':');
-  Serial.print(time.minute(), DEC);
-  Serial.print(':');
-  Serial.println(time.second(), DEC);
+  if (Firebase.ready() && signupOK && (millis() - sendDataPrevMillis > 1000 || sendDataPrevMillis == 0)){
+    sendDataPrevMillis = millis();
+    
+    Firebase.RTDB.setString(&fbdo, "data/tanggal", tanggal);
+    Firebase.RTDB.setString(&fbdo, "data/waktu", waktu);
+    Firebase.RTDB.setFloat(&fbdo, "data/ph", pHLevel);
+    Firebase.RTDB.setFloat(&fbdo, "data/kelembaban", kelembaban);
+    Firebase.RTDB.setFloat(&fbdo, "data/suhu", suhu);   
+  }
 }
