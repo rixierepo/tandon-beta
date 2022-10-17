@@ -1,145 +1,105 @@
-#include <DS3231.h>
-#include <DHT.h>
-#include <Firebase_ESP_Client.h>
-#include "addons/TokenHelper.h"
-#include "addons/RTDBHelper.h"
+#include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <ESPAsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <WebSerial.h>
 
-#define RELAY 1
+#include <SimpleDHT.h>
+#include <Wire.h>
+#include "RTClib.h"
+
 #define pinDHT 2
-#define pinPH 3
-#define WIFI_SSID ""
-#define WIFI_PASSWORD ""
-#define API_KEY ""
-#define DATABASE_URL "" 
- 
-DS3231 rtc(SDA, SCL); 
-DHT dht(pinDHT, DHT11); //Pin, Jenis DHT
-FirebaseData fbdo;
-FirebaseAuth auth;
-FirebaseConfig config;
 
-unsigned long startingTime;
-String tanggal;
-String waktu;
-float kelembaban;
-float suhu;
-int statusPengisian;
-float volt;
-float pHLevel;
-int adcPH;
-unsigned long sendDataPrevMillis = 0;
-bool signupOK = false;
+RTC_DS3231 rtc;
+SimpleDHT22 dht22(pinDHT); 
 
-void setup()
-{
-  pinMode(RELAY, OUTPUT);
+AsyncWebServer server(80);
+
+const char* ssid = "SYAFALIO"; // Your WiFi SSID
+const char* password = "03102010"; // Your WiFi Password
+
+int pinDHT22 = 2;
+int err = SimpleDHTErrSuccess;
+float temperature = 0;
+float humidity = 0;
+
+char daysOfTheWeek[7][12] = {"Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"};
+
+void setup () {
+
+  Serial.begin(115200);
   pinMode(pinDHT, INPUT);
-  pinMode(pinPH, INPUT);
-  
-  Serial.begin(9600); 
-  rtc.begin(); 
-  dht.begin();
 
-  millisTime = millis();
-  Serial.println("System Started at > " + startingTime);
+  delay(3000); 
 
-  // rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); // set waktu otomatiss
-  
-  rtc.setDate(1, 10, 2022);   // set tanggal
-  rtc.setTime(23, 59, 59);     // set waktu
+  WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+    if (WiFi.waitForConnectResult() != WL_CONNECTED) {
+        Serial.printf("WiFi Failed!\n");
+        return;
+    }
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+    // WebSerial is accessible at "<IP Address>/webserial" in browser
+    WebSerial.begin(&server);
+    /* Attach Message Callback */
+    WebSerial.msgCallback(recvMsg);
+    server.begin();
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting to Network");
-  while (WiFi.status() != WL_CONNECTED){
-    Serial.print(".");
-    delay(300);
+  if (! rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    while (1);
   }
 
-  Serial.println();
-  Serial.print("IP Address : ");
-  Serial.println(WiFi.localIP());
-  Serial.println();
-
-  config.api_key = API_KEY;
-  config.database_url = DATABASE_URL;
-
-  if (Firebase.signUp(&config, &auth, "", "")){
-    Serial.println("OK");
-    signupOK = true;
+  if (rtc.lostPower()) {
+    Serial.println("RTC lost power, lets set the time!");
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));    
   }
-  else{
-    Serial.printf("%s\n", config.signer.signupError.message.c_str());
-  }
-
-  config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
-  
-  Firebase.begin(&config, &auth);
-  Firebase.reconnectWiFi(true);
 }
- 
-void loop(){ 
-  
-  // SENSOR PH
-  adcPH = analogRead(pinPH);
-  volt = adcPH * 5.0 / 1023;
-  pHLevel = (6.4 * volt) - 5.7;
 
-  // RTC
-  tanggal = rtc.getDateStr(); // dd:mm:yy
-  waktu = rtc.getTimeStr(); // hh:mm:ss
+void loop () {
+    DateTime now = rtc.now();
 
-  // DHT11
-  kelembaban = dht.readHumidity();
-  suhu = dht.readTemperature();
+    Serial.print(daysOfTheWeek[now.dayOfTheWeek()]);
+    Serial.print(", ");
 
-  // RELAY
-  statusPengisian = digitalRead(RELAY);
+    Serial.print(now.day(), DEC);
+    Serial.print('/');
+    Serial.print(now.month(), DEC);
+    Serial.print('/');
+    Serial.print(now.year(), DEC);
+    Serial.print('\t');
 
-  if(statusPengisian != 1){
-    Serial.println("Status Pengisian : OFF");
-  }else{
-    Serial.println("Status Pengisian : ON");
-  }
-  
-  Serial.print(bulan + " | ");
-  Serial.print(hari + " | "); 
-  Serial.print(tanggal + " | ");
-  Serial.println(waktu); 
-  Serial.print("Suhu : " + suhu + " oC");
-  Serial.println(" | Kelembaban : " + kelembaban + " %");
-  
-  if(waktu == "23:59:59"){
-    digitalWrite(RELAY, HIGH);
-  }
-  if(waktu == "02:59:59"){
-    digitalWrite(RELAY, LOW);
-  }
-  if(waktu == "05:59:59"){
-    digitalWrite(RELAY, HIGH);
-  }
-  if(waktu == "08:59:59"){
-    digitalWrite(RELAY, LOW);
-  }
-  if(waktu == "11:59:59"){
-    digitalWrite(RELAY, HIGH);
-  }
-  if(waktu == "14:59:59"){
-    digitalWrite(RELAY, LOW);
-  }
-  if(waktu == "17:59:59"){
-    digitalWrite(RELAY, HIGH);
-  }
-  if(waktu == "20:59:59"){
-    digitalWrite(RELAY, LOW);
-  }
-
-  if (Firebase.ready() && signupOK && (millis() - sendDataPrevMillis > 1000 || sendDataPrevMillis == 0)){
-    sendDataPrevMillis = millis();
+    Serial.print(now.hour(), DEC);
+    Serial.print(':');
+    Serial.print(now.minute(), DEC);
+    Serial.print(':');
+    Serial.print(now.second(), DEC);
+    Serial.println();
     
-    Firebase.RTDB.setString(&fbdo, "data/tanggal", tanggal);
-    Firebase.RTDB.setString(&fbdo, "data/waktu", waktu);
-    Firebase.RTDB.setFloat(&fbdo, "data/ph", pHLevel);
-    Firebase.RTDB.setFloat(&fbdo, "data/kelembaban", kelembaban);
-    Firebase.RTDB.setFloat(&fbdo, "data/suhu", suhu);   
+  if ((err = dht22.read2(&temperature, &humidity, NULL)) != SimpleDHTErrSuccess) {
+    Serial.print("Read DHT22 failed, err="); 
+    Serial.println(err);
+    delay(2000);
+  return;
   }
+  Serial.print("OK > ");
+  Serial.print("Suhu : "); 
+  Serial.print((float)temperature); 
+  Serial.println(" *C, ");
+  Serial.print("Kelembaban : "); 
+  Serial.print((float)humidity); 
+  Serial.println(" RH%");
+  Serial.println(" ");
+
+  delay(1000);
+}
+
+void recvMsg(uint8_t *data, size_t len){
+  WebSerial.println("Received Data...");
+  String d = "";
+  for(int i=0; i < len; i++){
+    d += char(data[i]);
+  }
+  WebSerial.println(d);
 }
