@@ -1,22 +1,28 @@
+#include <Firebase_ESP_Client.h>
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
-#include <ESPAsyncTCP.h>
-#include <ESPAsyncWebServer.h>
-#include <WebSerial.h>
-
+#include "addons/TokenHelper.h"
+#include "addons/RTDBHelper.h"
 #include <SimpleDHT.h>
 #include <Wire.h>
 #include "RTClib.h"
 
 #define pinDHT 2
+#define WIFI_SSID "REPLACE_WITH_YOUR_SSID"
+#define WIFI_PASSWORD "REPLACE_WITH_YOUR_PASSWORD"
+#define API_KEY "REPLACE_WITH_YOUR_FIREBASE_PROJECT_API_KEY"
+#define DATABASE_URL "REPLACE_WITH_YOUR_FIREBASE_DATABASE_URL" 
 
 RTC_DS3231 rtc;
 SimpleDHT22 dht22(pinDHT); 
 
-AsyncWebServer server(80);
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
 
-const char* ssid = "SYAFALIO"; // Your WiFi SSID
-const char* password = "03102010"; // Your WiFi Password
+unsigned long sendDataPrevMillis = 0;
+int count = 0;
+bool signupOK = false;
 
 int pinDHT22 = 2;
 int err = SimpleDHTErrSuccess;
@@ -25,26 +31,39 @@ float humidity = 0;
 
 char daysOfTheWeek[7][12] = {"Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"};
 
-void setup () {
-
-  Serial.begin(115200);
+void setup(){
+  
   pinMode(pinDHT, INPUT);
 
   delay(3000); 
 
-  WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
-    if (WiFi.waitForConnectResult() != WL_CONNECTED) {
-        Serial.printf("WiFi Failed!\n");
-        return;
-    }
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
-    // WebSerial is accessible at "<IP Address>/webserial" in browser
-    WebSerial.begin(&server);
-    /* Attach Message Callback */
-    WebSerial.msgCallback(recvMsg);
-    server.begin();
+  Serial.begin(115200);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to Wi-Fi");
+  while (WiFi.status() != WL_CONNECTED){
+    Serial.print(".");
+    delay(300);
+  }
+  Serial.println();
+  Serial.print("Connected with IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
+
+  config.api_key = API_KEY;
+  config.database_url = DATABASE_URL;
+
+  if (Firebase.signUp(&config, &auth, "", "")){
+    Serial.println("ok");
+    signupOK = true;
+  }
+  else{
+    Serial.printf("%s\n", config.signer.signupError.message.c_str());
+  }
+
+  config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
+  
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
 
   if (! rtc.begin()) {
     Serial.println("Couldn't find RTC");
@@ -92,14 +111,18 @@ void loop () {
   Serial.println(" RH%");
   Serial.println(" ");
 
-  delay(1000);
-}
-
-void recvMsg(uint8_t *data, size_t len){
-  WebSerial.println("Received Data...");
-  String d = "";
-  for(int i=0; i < len; i++){
-    d += char(data[i]);
+  if (Firebase.ready() && signupOK && (millis() - sendDataPrevMillis > 1000 || sendDataPrevMillis == 0)){
+    sendDataPrevMillis = millis();
+    
+    if (Firebase.RTDB.setInt(&fbdo, "test/int", count)){
+      Serial.println("OK");
+      //Serial.println("PATH: " + fbdo.dataPath());
+      //Serial.println("TYPE: " + fbdo.dataType());
+    }
+    else {
+      Serial.println("FAILED");
+      Serial.println("REASON: " + fbdo.errorReason());
+    }
   }
-  WebSerial.println(d);
+  delay(1000);
 }
